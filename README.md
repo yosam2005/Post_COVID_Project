@@ -31,4 +31,4 @@ This work demonstrates how panel regression helps explain cross-country macroeco
 
 ---
 
-*Author: Yoni | Created: 2025-11-05*
+*Author: Yonatan Solomon | Created: 2025-11-05*
