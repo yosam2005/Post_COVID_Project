@@ -1,0 +1,560 @@
+---
+title: "Post-COVID Project: WBD + IMF Panel Dataset"
+author: "Yonatan Solomon"
+date: "2025-11-05"
+output: html_document
+
+---
+
+
+
+# Post-COVID Economic Panel Analysis (2015–2023)
+### A Study Using World Bank and IMF Data in R
+
+## Aim and Introduction
+The aim of this project was to analyze how key macroeconomic factors shaped inflation (CPI) across countries in the post-COVID period, using a combined World Bank and IMF panel dataset spanning **2015–2023**.
+
+The project investigates how changes in **GDP**, **unemployment**, **government spending**, **exports**, and **international monetary values** influenced national inflation trends before, during, and after the pandemic.
+
+This work integrates **data wrangling**, **exploratory visualization**, and **fixed-effects regression modeling** using R — providing a comprehensive view of economic recovery patterns across countries.
+
+---
+
+## Body (Methodology and Analysis)
+
+### 1–7. Data Preparation and Cleaning
+Multiple CSV datasets from the World Bank and IMF were imported, cleaned, and reshaped into a consistent **panel format (Country–Year observations).**
+
+- Year columns were standardized (e.g., `X2015 → 2015`).  
+- Missing values were handled by **forward and backward filling** within each country.  
+- Datasets were merged into one structured panel to create a **high-quality foundation** for time-series cross-sectional analysis.
+
+---
+
+### 8–11. Exploratory Data Analysis
+Quick checks and plots confirmed:
+
+- Data covered **121 countries** and roughly **9 years (2015–2023)**.  
+- **Inflation (CPI)** spiked sharply in **2020–2022**, consistent with global COVID effects.  
+- **GDP**, **Exports**, and **Government Expenditure** showed recovery trends after 2021.  
+- Visualization of key variables (line charts and histograms) helped detect **outliers** and ensure a **balanced panel structure**.
+
+---
+
+### 12. Fixed-Effects Regression Modeling
+A fixed-effects panel regression was run using the `plm()` package to control for country-specific effects:
+
+\[
+CPI_{it} = \beta_1 GDP_{it} + \beta_2 Exports_{it} + \beta_3 GovExp_{it} + \beta_4 Unemployment_{it} + \mu_i + \varepsilon_{it}
+\]
+
+**Key findings:**
+
+- **GDP (–0.48, p < 0.001)** — Strong economic growth slightly reduced inflation after COVID, possibly due to productivity recovery.  
+- **GovExp (–1.47, p < 0.001)** — Higher public spending initially curbed inflation through stimulus and subsidies.  
+- **Unemployment (–0.39, p < 0.05)** — Rising unemployment reduced price pressure, as expected.  
+- **Exports** had no significant direct impact on CPI.  
+
+The **R² ≈ 0.02** reflects the high variability of inflation, which is typical for macroeconomic panel data.
+
+---
+
+### 13. Regression Diagnostics
+Model reliability was verified using **residual analysis**:
+
+- **Residuals vs Fitted Plot** → Residuals centered around zero → no visible bias.  
+- **Histogram of Residuals** → Mostly symmetric around zero → approximate normality.  
+- **QQ Plot** → Moderate alignment with diagonal → acceptable distributional assumptions.  
+
+These checks confirm that the model is statistically consistent and that **fixed-effects estimation** was appropriate for this dataset.
+
+---
+
+## Conclusion
+This project demonstrates how to combine **World Bank** and **IMF** data into a unified, analyzable panel to evaluate **post-COVID economic performance**.
+
+Between **2015 and 2023**, most countries exhibited:
+
+- A **sharp inflation rise during COVID (2020–2022)**  
+- A **gradual stabilization** as GDP and government policies recovered
+
+The analysis shows that macroeconomic stability post-pandemic depends on multiple interacting factors — not just growth, but also **labor markets** and **fiscal interventions**.
+
+Overall, this project highlights the power of **panel regression in R** for uncovering global economic patterns, while reinforcing best practices in **data cleaning**, **visualization**, and **econometric diagnostics**.
+
+---
+
+*End of Summary.*
+
+
+
+
+
+  -------------------------------
+  Section 1: Setup
+  ------------------------------
+This section sets up the folder path and loads all necessary R packages for data cleaning, transformation, visualization, and panel regression.
+
+
+```{r setup, message=FALSE, warning=FALSE}
+folder <- "C:/Post_COVID_project/WBD_IMF.data/"
+
+
+
+# Load libraries
+library(dplyr)
+library(tidyr)
+library(plm)
+library(car)
+library(countrycode)
+library(ggplot2)
+
+
+```
+
+-------------------------------
+Section 2: Load WBD CSVs
+-------------------------------
+
+Here we load the World Bank datasets for CPI, Exports, GDP, Government Expenditure, and Unemployment.
+
+
+```{r}
+# List of CSV files from World Bank Data
+
+wbd_files <- c("API_FP.CPI.csv", "API_NE.EXP.csv", "API_NY.GDP.csv",
+"API_SH.XPD.csv", "API_SL.UEM.csv")
+
+# Read all CSVs, skipping metadata rows
+
+wbd_data <- lapply(wbd_files, function(file) {
+read.csv(paste0(folder, file), skip = 4)
+})
+
+# Name the list elements for easy access
+
+names(wbd_data) <- gsub(".csv", "", wbd_files)
+
+# Assign each dataset to a variable
+
+API_FP.CPI   <- wbd_data[["API_FP.CPI"]]
+API_NE.EXP   <- wbd_data[["API_NE.EXP"]]
+API_NY.GDP   <- wbd_data[["API_NY.GDP"]]
+API_SH.XPD   <- wbd_data[["API_SH.XPD"]]
+API_SL.UEM   <- wbd_data[["API_SL.UEM"]]
+
+```
+
+-----------------------------
+Section 3: Clean Year Columns
+-----------------------------
+We remove the "X" prefix from year columns to make them numeric and easier to reshape later.
+
+```{r}
+rename_years <- function(df) {
+names(df)[5:ncol(df)] <- gsub("^X", "", names(df)[5:ncol(df)])
+return(df)
+}
+wbd_data <- lapply(wbd_data, rename_years)
+
+API_FP.CPI   <- wbd_data[["API_FP.CPI"]]
+API_NE.EXP   <- wbd_data[["API_NE.EXP"]]
+API_NY.GDP   <- wbd_data[["API_NY.GDP"]]
+API_SH.XPD   <- wbd_data[["API_SH.XPD"]]
+API_SL.UEM   <- wbd_data[["API_SL.UEM"]]
+
+
+```
+
+Section 4: Load and Clean IMF Data
+
+We load the IMF dataset and clean its year columns for consistency with WBD data.
+
+```{r}
+IMF_DATA <- read.csv(paste0(folder, "IMF_DATA.2025.csv"), header = TRUE)
+year_cols <- grep("^X[0-9]{4}$", names(IMF_DATA), value = TRUE)
+IMF_clean <- IMF_DATA[, c("COUNTRY", "INDICATOR", "FREQUENCY", "SCALE", year_cols)]
+names(IMF_clean)[5:ncol(IMF_clean)] <- gsub("^X", "", names(IMF_clean)[5:ncol(IMF_clean)])
+
+rm(IMF_DATA, wbd_files)  # clean environment
+
+```
+
+Section 5: Reshape Datasets to Long Format
+
+We convert each dataset from wide to long format for merging and time-series analysis.
+
+```{r}
+reshape_long <- function(df, value_name){
+  # Select columns with 4-digit years, optionally starting with X
+  year_cols <- grep("^(X)?\\d{4}$", names(df), value = TRUE)
+  
+  df_long <- df %>%
+    pivot_longer(
+      cols = all_of(year_cols),
+      names_to = "Year",
+      values_to = value_name
+    ) %>%
+    mutate(Year = as.numeric(gsub("X", "", Year)))  # remove X if present
+  
+  return(df_long)
+}
+
+CPI_long     <- reshape_long(API_FP.CPI, "CPI")
+Exports_long <- reshape_long(API_NE.EXP, "Exports")
+GDP_long     <- reshape_long(API_NY.GDP, "GDP")
+GovExp_long  <- reshape_long(API_SH.XPD, "GovExp")
+Unemp_long   <- reshape_long(API_SL.UEM, "Unemployment")
+IMF_long     <- reshape_long(IMF_clean, "IMF_Value")
+
+
+```
+
+
+Section 6: Merge WBD Datasets into Master Data
+
+We merge all WBD datasets by country and year to form a master dataset.
+
+```{r}
+master_data <- CPI_long %>%
+select(Country.Name, Country.Code, Year, CPI) %>%
+left_join(Exports_long %>% select(Country.Code, Year, Exports), by = c("Country.Code","Year")) %>%
+left_join(GDP_long %>% select(Country.Code, Year, GDP), by = c("Country.Code","Year")) %>%
+left_join(GovExp_long %>% select(Country.Code, Year, GovExp), by = c("Country.Code","Year")) %>%
+left_join(Unemp_long %>% select(Country.Code, Year, Unemployment), by = c("Country.Code","Year"))
+
+
+
+```
+
+
+ -------------------------------
+
+ Section 7: Merge IMF Data (Final)
+
+ -------------------------------
+
+ Purpose: Safely merge IMF data into the WBD master dataset
+
+ensuring one row per country-year.
+
+
+
+```{r}
+
+# Step 0: Deduplicate master_data (average values if duplicates exist)
+
+master_data <- master_data %>%
+group_by(Country.Code, Year) %>%
+summarise(
+Country.Name = first(Country.Name),  # keep country name
+CPI = mean(CPI, na.rm = TRUE),
+Exports = mean(Exports, na.rm = TRUE),
+GDP = mean(GDP, na.rm = TRUE),
+GovExp = mean(GovExp, na.rm = TRUE),
+Unemployment = mean(Unemployment, na.rm = TRUE),
+.groups = "drop"
+)
+
+# Step 1: Filter IMF to a single indicator (replace with the indicator you need)
+
+IMF_filtered <- IMF_long %>%
+filter(INDICATOR == "Fiscal balance") %>%  # choose the indicator
+select(COUNTRY, Year, IMF_Value)
+
+# Step 2: Merge IMF_filtered with master_data
+
+master_data_panel <- master_data %>%
+left_join(IMF_filtered, by = c("Country.Name" = "COUNTRY", "Year"))
+
+# Step 3: Quick duplicate check (should return 0 rows)
+
+dup_check <- master_data_panel %>%
+count(Country.Name, Year) %>%
+filter(n > 1)
+
+if(nrow(dup_check) > 0){
+warning("Duplicates found after merge! Check IMF indicator or master_data.")
+} else {
+message("Merge successful: master_data_panel ready for analysis.")
+}
+
+# Step 4: Optional checks
+
+head(master_data_panel)
+str(master_data_panel)
+dim(master_data_panel)
+
+```
+
+--------------------------------------
+
+Section 8: Filter Years and Check Data
+--------------------------------------
+
+We focus on data from 2010–2024 and inspect missing values.
+
+```{r}
+master_data <- master_data %>% filter(Year >= 2010 & Year <= 2024)
+sapply(master_data, function(x) sum(is.na(x)))
+
+
+```
+
+-------------------------------
+
+ Section 9: Fill Missing Values
+
+-------------------------------
+
+We fill missing values within each country using last and next observations.
+
+```{r}
+
+vars_to_fill <- c("CPI","Exports","GDP","GovExp","Unemployment","IMF_Value")
+
+master_data_clean <- master_data_panel %>%
+group_by(Country.Code) %>%
+arrange(Year) %>%
+fill(all_of(vars_to_fill), .direction = "downup") %>%  # fill missing values up and down
+ungroup()
+
+# Optional: check if any NA remain
+
+sapply(master_data_clean, function(x) sum(is.na(x)))
+
+
+
+```
+
+
+ -------------------------------
+ Section 10: Final Panel Dataset
+ -------------------------------
+ 
+ Purpose: Summarize cleaned data, compute logs, and prepare the panel dataset
+          while preserving rows with missing values.
+          
+```{r}
+
+
+master_data_unique <- master_data_clean %>%
+  group_by(Country.Code, Year) %>%
+  summarise(
+    Country.Name = first(Country.Name),     # keep country name
+    CPI = mean(CPI, na.rm = TRUE),
+    Exports = mean(Exports, na.rm = TRUE),
+    GDP = mean(GDP, na.rm = TRUE),
+    GovExp = mean(GovExp, na.rm = TRUE),
+    Unemployment = mean(Unemployment, na.rm = TRUE),
+    IMF_Value = mean(IMF_Value, na.rm = TRUE),  # may be NA
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Compute logs safely: avoid log of negative or zero values
+    GDP_log = ifelse(!is.na(GDP) & (GDP + 100) > 0, log(GDP + 100), NA),
+    Exports_log = ifelse(!is.na(Exports) & (Exports + 1) > 0, log(Exports + 1), NA),
+    GovExp_log = ifelse(!is.na(GovExp) & (GovExp + 1) > 0, log(GovExp + 1), NA)
+  )
+
+# Optional: inspect first rows
+head(master_data_unique)
+
+# Optional: check dimensions and summary
+dim(master_data_unique)
+summary(master_data_unique)
+
+# Save cleaned panel dataset for future use
+write.csv(master_data_unique, "master_data_panel_clean.csv", row.names = FALSE)
+
+```
+
+
+ -------------------------------
+ Section 11: Quick Checks and Key Variable Plots (Simplified)
+ -------------------------------
+
+We verify data structure and visualize key economic indicators for the top 10 GDP countries.
+
+```{r}
+
+
+library(ggplot2)
+library(dplyr)
+library(countrycode)
+
+# Step 1: Assign proper country names
+master_data_panel_named <- master_data_unique %>%
+  mutate(Country.Name = countrycode(Country.Code, origin = "iso3c", destination = "country.name"),
+         Country.Name = ifelse(Country.Code == "WLD", "World Aggregate", Country.Name))
+
+# Step 2: Quick checks
+num_countries <- master_data_panel_named %>% summarise(n_countries = n_distinct(Country.Code))
+print(num_countries)
+
+years_per_country <- master_data_panel_named %>%
+  group_by(Country.Name, Country.Code) %>%
+  summarise(years_available = n_distinct(Year), .groups = "drop") %>%
+  arrange(desc(years_available))
+print(years_per_country, n = nrow(years_per_country))
+
+# Step 3: Identify top 10 countries by average GDP
+top_countries <- master_data_panel_named %>%
+  group_by(Country.Name) %>%
+  summarise(avg_GDP = mean(GDP, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(avg_GDP)) %>%
+  slice(1:10) %>%
+  pull(Country.Name)
+
+# Step 4: Plot function
+plot_variable <- function(var, y_label) {
+  data_to_plot <- master_data_panel_named %>% filter(Country.Name %in% top_countries)
+  
+  ggplot(data_to_plot, aes(x = Year, y = .data[[var]], color = Country.Name)) +
+    geom_line(size = 1) +
+    labs(
+      title = paste0(y_label, " Trends (Top 10 GDP countries)"),
+      x = "Year",
+      y = y_label,
+      color = "Country"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "bottom",
+      legend.title = element_text(face = "bold"),
+      plot.title = element_text(face = "bold"),
+      plot.subtitle = element_text(face = "italic")
+    )
+}
+
+# Step 5: Generate plots
+plot_variable("CPI", "Consumer Price Index (CPI)")
+plot_variable("GDP", "Gross Domestic Product (GDP)")
+plot_variable("Exports", "Exports")
+plot_variable("GovExp", "Government Expenditure")
+plot_variable("Unemployment", "Unemployment Rate")
+plot_variable("IMF_Value", "IMF Indicator")
+
+
+```
+
+ -------------------------------
+ Section 12: Basic Panel Regression (Fixed-Effects Model)
+ -------------------------------
+
+We estimate a fixed-effects model to analyze how macroeconomic factors relate to CPI changes.
+
+```{r}
+
+
+library(plm)
+library(car)  # for VIF
+
+# Step 1: Prepare panel data
+panel_data_adjusted <- master_data_panel_named %>%
+  select(Country.Code, Year, CPI, GDP, Exports, GovExp, Unemployment, IMF_Value) %>%
+  group_by(Country.Code) %>%
+  arrange(Year) %>%
+  fill(GDP, Exports, GovExp, Unemployment, IMF_Value, .direction = "downup") %>%
+  ungroup() %>%
+  drop_na(CPI)  # ensure dependent variable exists
+
+# Step 2: Check if IMF_Value has enough non-missing data
+num_IMF_nonNA <- sum(!is.na(panel_data_adjusted$IMF_Value))
+
+if(num_IMF_nonNA > 0){
+  predictors <- c("GDP", "Exports", "GovExp", "Unemployment", "IMF_Value")
+} else {
+  predictors <- c("GDP", "Exports", "GovExp", "Unemployment")
+  message("IMF_Value mostly missing, excluding from regression.")
+}
+
+# Step 3: Check multicollinearity (VIF)
+vif_formula <- as.formula(paste("CPI ~", paste(predictors, collapse = " + ")))
+vif_model <- lm(vif_formula, data = panel_data_adjusted)
+vif_values <- vif(vif_model)
+print("VIF Values:")
+print(vif_values)
+
+# Step 4: Run fixed-effects panel regression
+panel_model <- plm(
+  vif_formula,
+  data = panel_data_adjusted,
+  index = c("Country.Code", "Year"),
+  model = "within"
+)
+
+# Step 5: View regression summary
+summary(panel_model)
+
+```
+ -------------------------------
+ Section 13: Regression Diagnostics (Final Polished)
+ -------------------------------
+
+```{r}
+
+
+library(ggplot2)
+library(dplyr)
+
+# Step 1: Extract residuals and fitted values
+residuals_vec <- residuals(panel_model)
+fitted_vec <- fitted(panel_model)
+
+# Step 2: Extract Country and Year from row names safely
+rownames_split <- strsplit(rownames(panel_model$model), "\\.")
+panel_residuals <- data.frame(
+  Country.Code = sapply(rownames_split, `[`, 1),
+  Year = as.integer(sapply(rownames_split, `[`, 2)),
+  .fitted = fitted_vec,
+  .resid = residuals_vec
+)
+
+# Step 3: Residuals vs Fitted Values
+ggplot(panel_residuals, aes(x = .fitted, y = .resid)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Residuals vs Fitted Values",
+    x = "Fitted CPI",
+    y = "Residuals"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Step 4: Histogram of Residuals (better centered scaling)
+ggplot(panel_residuals, aes(x = .resid)) +
+  geom_histogram(bins = 40, fill = "steelblue", color = "white", alpha = 0.8) +
+  scale_x_continuous(limits = c(-10, 10)) +  # focus on central range
+  labs(
+    title = "Histogram of Residuals (Centered)",
+    x = "Residuals",
+    y = "Count"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Step 5: QQ Plot (Normality Check)
+qq_data <- data.frame(sample = panel_residuals$.resid)
+ggplot(qq_data, aes(sample = sample)) +
+  stat_qq(color = "steelblue", alpha = 0.6) +
+  stat_qq_line(color = "red", linewidth = 1) +
+  labs(
+    title = "QQ Plot of Residuals",
+    x = "Theoretical Quantiles",
+    y = "Sample Quantiles"
+  ) +
+  theme_minimal(base_size = 14)
+
+
+```
+
+
+
+
+*End of Project*
+
+
+
+
+
+
